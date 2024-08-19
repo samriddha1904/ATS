@@ -6,16 +6,18 @@ import PyPDF2 as pdf
 import re
 from googlesearch import search
 import numpy as np
+import zipfile
+import tempfile
 
+# Set up your Google API key
 os.environ['GOOGLE_API_KEY'] = "AIzaSyCfGPIrdQ4ratJzojK81RyDluE22BiuZoc"
-# Configure the generative AI model with the Google API key
 genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
 
 # Set up the model configuration for text generation
 generation_config = {
-    "temperature": 0.05,  # Lower temperature for more consistent results
-    "top_p": 0.95,        # Adjust top_p
-    "top_k": 10,          # Adjust top_k
+    "temperature": 0.05,
+    "top_p": 0.95,
+    "top_k": 10,
     "max_output_tokens": 4096,
 }
 
@@ -25,82 +27,62 @@ safety_settings = [
     for category in ["HARASSMENT", "HATE_SPEECH", "SEXUALLY_EXPLICIT", "DANGEROUS_CONTENT"]
 ]
 
-# This Code Generates the responses from Gemini
 def generate_response_from_gemini(input_text):
-    # Create a GenerativeModel instance with 'gemini-pro' as the model type
-    llm = genai.GenerativeModel(
-        model_name="gemini-pro",
-        generation_config=generation_config,
-        safety_settings=safety_settings,
-    )
-    # Generate content based on the input text
-    output = llm.generate_content(input_text)
-    # Return the generated text
-    return output.text
+    try:
+        llm = genai.GenerativeModel(
+            model_name="gemini-pro",
+            generation_config=generation_config,
+            safety_settings=safety_settings,
+        )
+        output = llm.generate_content(input_text)
+        return output.text
+    except Exception as e:
+        st.error(f"Error generating response: {e}")
+        return None
 
 def extract_text_from_pdf_file(uploaded_file):
-    # Use PdfReader to read the text content from a PDF file
-    pdf_reader = pdf.PdfReader(uploaded_file)
-    text_content = ""
-    for page in pdf_reader.pages:
-        text_content += str(page.extract_text())
-    return text_content
+    try:
+        pdf_reader = pdf.PdfReader(uploaded_file)
+        text_content = ""
+        for page in pdf_reader.pages:
+            text_content += str(page.extract_text())
+        return text_content
+    except Exception as e:
+        st.error(f"Error extracting text from PDF: {e}")
+        return ""
 
 def extract_text_from_docx_file(uploaded_file):
-    # Use docx2txt to extract text from a DOCX file
-    return docx2txt.process(uploaded_file)
+    try:
+        return docx2txt.process(uploaded_file)
+    except Exception as e:
+        st.error(f"Error extracting text from DOCX: {e}")
+        return ""
 
-# Function to extract job title and location from the job description
 def extract_job_title_and_location(job_description):
-    # Regular expressions to match job title and location
-    job_title_match = re.search(r"Job Title:\s*(.*)", job_description)
-    location_match = re.search(r"Location:\s*(.*)", job_description)
+    try:
+        job_title_match = re.search(r"Job Title:\s*(.*)", job_description)
+        location_match = re.search(r"Location:\s*(.*)", job_description)
+        job_title = job_title_match.group(1).strip() if job_title_match else "Not found"
+        location = location_match.group(1).strip() if location_match else "Not found"
+        return job_title, location
+    except Exception as e:
+        st.error(f"Error extracting job title and location: {e}")
+        return "Not found", "Not found"
 
-    # Extracting the matched text if found
-    job_title = job_title_match.group(1).strip() if job_title_match else "Not found"
-    location = location_match.group(1).strip() if location_match else "Not found"
-
-    return job_title, location
-
-# Prompt Template
 input_prompt_template = """
-As an experienced Applicant Tracking System (ATS) analyst,
-with profound knowledge in technology, software engineering, data science,
-and big data engineering, your role involves evaluating resumes against job descriptions.
-Recognizing the competitive job market, provide top-notch assistance for resume improvement.
-Your goal is to analyze the resume against the given job description,
-assign a percentage match based on key criteria, and pinpoint missing keywords accurately.
-resume:{text}
-description:{job_description}
-I want the response in one single string having the structure
-{{"Job Description Match":"%","Missing Keywords":"","Candidate Summary":"","Experience":""}}
+As an experienced Applicant Tracking System (ATS) analyst, with profound knowledge in technology, software engineering, data science, and big data engineering, your role involves evaluating resumes against job descriptions. Recognizing the competitive job market, provide top-notch assistance for resume improvement. Your goal is to analyze the resume against the given job description, assign a percentage match based on key criteria, and pinpoint missing keywords accurately. resume:{text} description:{job_description} I want the response in one single string having the structure {{"Job Description Match":"%","Missing Keywords":"","Candidate Summary":"","Experience":""}}
 """
 
 def search_profiles_linkedin(job_title, location):
-    """
-    Searches for LinkedIn profiles based on the job title and location.
-    Parameters:
-    job_title (str): The job title to search for.
-    location (str): The location to search in.
-    Returns:
-    list: A list of URLs that match the search query.
-    """
     query = f"{job_title} profiles in {location} site:linkedin.com"
     try:
         results = search(query, tld="com", lang="en", num=15, stop=15, pause=1)
         return list(results)
     except Exception as e:
-        st.write(f"An error occurred: {e}")
+        st.error(f"Error searching LinkedIn profiles: {e}")
         return []
 
 def scrape_remove_url(results):
-    """
-    Filters out URLs that match certain unwanted patterns.
-    Parameters:
-    results (list): A list of URLs to filter.
-    Returns:
-    list: A list of filtered URLs.
-    """
     unwanted_patterns = [
         'https://in.linkedin.com/jobs/',
         'https://www.linkedin.com/posts/'
@@ -109,15 +91,6 @@ def scrape_remove_url(results):
     return filtered_results
 
 def get_user_feedback(results):
-    """
-    Gets user feedback on the relevance and correctness of the URLs.
-
-    Parameters:
-    results (list): A list of URLs to get feedback on.
-
-    Returns:
-    tuple: A tuple containing the list of relevant URLs and the relevance accuracy.
-    """
     relevant_results = []
     for url in results:
         user_input = st.text_input(f"Is this URL relevant and correct? (yes/no): {url}", key=url)
@@ -128,28 +101,36 @@ def get_user_feedback(results):
 
 def evaluate_resume(resume_text, job_description):
     response_text = generate_response_from_gemini(input_prompt_template.format(text=resume_text, job_description=job_description))
-    # Extract Job Description Match percentage from the response
-    match_percentage_str = response_text.split('"Job Description Match":"')[1].split('"')[0]
-    # Remove percentage symbol and convert to float
-    match_percentage = float(match_percentage_str.rstrip('%'))
-    missing_keywords_str = response_text.split('"Missing Keywords":"')[1].split('"')[0]
-    candidate_summary_str = response_text.split('"Candidate Summary":"')[1].split('"')[0]
-    experience_str = response_text.split('"Experience":"')[1].split('"')[0]
-    return match_percentage, missing_keywords_str, candidate_summary_str, experience_str
+    if response_text:
+        match_percentage_str = response_text.split('"Job Description Match":"')[1].split('"')[0]
+        match_percentage = float(match_percentage_str.rstrip('%'))
+        missing_keywords_str = response_text.split('"Missing Keywords":"')[1].split('"')[0]
+        candidate_summary_str = response_text.split('"Candidate Summary":"')[1].split('"')[0]
+        experience_str = response_text.split('"Experience":"')[1].split('"')[0]
+        return match_percentage, missing_keywords_str, candidate_summary_str, experience_str
+    else:
+        return 0, "Error", "Error", "Error"
 
 # Streamlit app
 st.title("Intelligent ATS and LinkedIn Profile Search")
 
 # Sidebar for navigation
 st.sidebar.title("Navigation")
-page = st.sidebar.selectbox("Choose a page", ["ATS Evaluation", "LinkedIn Profile Search"])
+page = st.sidebar.selectbox("Choose a page", ["ATS Evaluation", "LinkedIn Profile Search", "LinkedIn Candidate Search"])
 
 if page == "ATS Evaluation":
     st.header("ATS Evaluation")
-    job_description = st.text_area("Paste the Job Description", height=300)
-    uploaded_files = st.file_uploader("Upload Your Resumes", type=["pdf", "docx"], help="Please upload PDF or DOCX files", accept_multiple_files=True)
+    
+    jd_file = st.file_uploader("Upload the Job Description File", type=["pdf", "docx"], help="Please upload PDF or DOCX file")
+    uploaded_zip = st.file_uploader("Upload the Resume Folder (ZIP)", type=["zip"], help="Upload a ZIP folder containing PDF or DOCX resumes")
 
-    if job_description:
+    job_description = ""
+    if jd_file:
+        if jd_file.type == "application/pdf":
+            job_description = extract_text_from_pdf_file(jd_file)
+        elif jd_file.type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+            job_description = extract_text_from_docx_file(jd_file)
+        
         job_title, location = extract_job_title_and_location(job_description)
         st.write(f"**Job Title:** {job_title}")
         st.write(f"**Location:** {location}")
@@ -157,42 +138,48 @@ if page == "ATS Evaluation":
     submit_button = st.button("Submit")
 
     if submit_button:
-        if uploaded_files:
-            no_match = True
-            for uploaded_file in uploaded_files:
-                if uploaded_file.type == "application/pdf":
-                    resume_text = extract_text_from_pdf_file(uploaded_file)
-                elif uploaded_file.type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
-                    resume_text = extract_text_from_docx_file(uploaded_file)
+        if uploaded_zip and job_description:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                with zipfile.ZipFile(uploaded_zip, 'r') as zip_ref:
+                    zip_ref.extractall(temp_dir)
 
-                # Run evaluation multiple times and average the results
-                num_runs = 3  # Number of times to run the evaluation
-                match_percentages = []
-                for _ in range(num_runs):
-                    match_percentage, missing_keywords_str, candidate_summary_str, experience_str = evaluate_resume(resume_text, job_description)
-                    match_percentages.append(match_percentage)
+                resume_files = [os.path.join(temp_dir, file) for file in os.listdir(temp_dir) if file.endswith(('.pdf', '.docx'))]
 
-                avg_match_percentage = np.mean(match_percentages)
+                no_match = True
+                for resume_file in resume_files:
+                    if resume_file.endswith(".pdf"):
+                        with open(resume_file, "rb") as file:
+                            resume_text = extract_text_from_pdf_file(file)
+                    elif resume_file.endswith(".docx"):
+                        resume_text = extract_text_from_docx_file(resume_file)
 
-                st.subheader(f"ATS Evaluation Result for {uploaded_file.name}:")
-                st.write(f'Match to Job Description: {avg_match_percentage}%')
-                st.write("Keywords Missing: ", missing_keywords_str)
-                st.write("Summary of Resume of Candidate: ")
-                st.write(candidate_summary_str)
-                st.write("Experience: ", experience_str)
+                    num_runs = 3
+                    match_percentages = []
+                    for _ in range(num_runs):
+                        match_percentage, missing_keywords_str, candidate_summary_str, experience_str = evaluate_resume(resume_text, job_description)
+                        match_percentages.append(match_percentage)
 
-                if avg_match_percentage >= 80:
-                    st.text("Move forward with hiring")
-                    no_match = False
-                else:
-                    st.text("Not a Match")
+                    avg_match_percentage = np.mean(match_percentages)
 
-            if no_match:
-                st.session_state["show_linkedin_profiles"] = True
-                st.session_state["job_title"] = job_title
-                st.session_state["location"] = location
+                    st.subheader(f"ATS Evaluation Result for {os.path.basename(resume_file)}:")
+                    st.write(f'Match to Job Description: {avg_match_percentage}%')
+                    st.write("Keywords Missing: ", missing_keywords_str)
+                    st.write("Summary of Resume of Candidate: ")
+                    st.write(candidate_summary_str)
+                    st.write("Experience: ", experience_str)
+
+                    if avg_match_percentage >= 75:
+                        st.text("Move forward with hiring")
+                        no_match = False
+                    else:
+                        st.text("Not a Match")
+
+                if no_match:
+                    st.session_state["show_linkedin_profiles"] = True
+                    st.session_state["job_title"] = job_title
+                    st.session_state["location"] = location
         else:
-            st.warning("Please upload at least one resume.")
+            st.warning("Please upload both the resume folder and job description file.")
 
 elif page == "LinkedIn Profile Search":
     if "show_linkedin_profiles" not in st.session_state:
@@ -227,5 +214,23 @@ elif page == "LinkedIn Profile Search":
     else:
         st.write("Please go to the ATS Evaluation page first.")
 
-if __name__ == '__main__':
-  app.run(debug=True)
+elif page == "LinkedIn Candidate Search":
+    st.header("LinkedIn Candidate Search")
+    
+    job_title_input = st.text_input("Enter the Job Title", help="Enter the job title you want to search for")
+    location_input = st.text_input("Enter the Location", help="Enter the location you want to search in")
+
+    if st.button("Search LinkedIn Candidates"):
+        if job_title_input and location_input:
+            results_linkedin = search_profiles_linkedin(job_title_input, location_input)
+            results_best_match = scrape_remove_url(results_linkedin)
+            if results_best_match:
+                st.subheader("LinkedIn Profiles:")
+                relevant_results, accuracy = get_user_feedback(results_best_match)
+                st.write(f"Relevance Accuracy: {accuracy}%")
+                for url in relevant_results:
+                    st.write(url)
+            else:
+                st.write("No LinkedIn profiles found.")
+        else:
+            st.warning("Please enter both a job title and location.")
