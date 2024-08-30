@@ -150,8 +150,9 @@ if page == "ATS Evaluation":
                 st.write(candidate_summary_str)
                 st.write("Experience: ", experience_str)
 
-                # Change the value from 75, as it might be the threshold value
-                if avg_match_percentage >= 75:
+                # Take any other value as threshold, and check accuracy of the resumes
+                threshold=75
+                if avg_match_percentage >= threshold:
                     st.text("Move forward with hiring")
                     no_match = False
                 else:
