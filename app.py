@@ -109,6 +109,7 @@ if page == "ATS Evaluation":
     st.header("ATS Evaluation")
 
     job_description_file = st.file_uploader("Upload the Job Description", type=["pdf", "docx", "txt"])
+    # Change it from single resume upload to zip upload and also add a logic to extract the files and then parse it for matching
     uploaded_files = st.file_uploader("Upload Your Resumes", type=["pdf", "docx"], help="Please upload PDF or DOCX files", accept_multiple_files=True)
 
     if job_description_file:
